@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Server } from '@hapi/hapi'
 import plugin from '../src/index'
 
@@ -9,759 +9,617 @@ describe('rati', () => {
     server = new Server()
   })
 
+  afterEach(async () => {
+    await server.stop()
+  })
+
   describe('plugin registration', () => {
-    it('should register successfully with default options', async () => {
-      await expect(
-        server.register({
-          plugin,
-          options: {}
-        })
-      ).resolves.not.toThrow()
-    })
-
-    it('should register with custom version', async () => {
-      await expect(
-        server.register({
-          plugin,
-          options: { version: 'v2' }
-        })
-      ).resolves.not.toThrow()
-    })
-
-    it('should register with custom prefix', async () => {
-      await expect(
-        server.register({
-          plugin,
-          options: { prefix: 'service' }
-        })
-      ).resolves.not.toThrow()
-    })
-
-    it('should register with empty version', async () => {
-      await expect(
-        server.register({
-          plugin,
-          options: { version: '' }
-        })
-      ).resolves.not.toThrow()
-    })
-
-    it('should register with empty prefix', async () => {
-      await expect(
-        server.register({
-          plugin,
-          options: { prefix: '' }
-        })
-      ).resolves.not.toThrow()
-    })
-
-    it('should reject invalid option types', async () => {
-      await expect(
-        server.register({
-          plugin,
-          options: { version: 123 } as any
-        })
-      ).rejects.toThrow('Invalid plugin options')
-    })
-
-    it('should reject unknown options', async () => {
-      await expect(
-        server.register({
-          plugin,
-          options: { invalidOption: 'value' } as any
-        })
-      ).rejects.toThrow('Invalid plugin options')
-    })
-
-    it('should reject version longer than 255 characters', async () => {
-      const tooLong = 'a'.repeat(256)
-      await expect(
-        server.register({
-          plugin,
-          options: { version: tooLong }
-        })
-      ).rejects.toThrow('Invalid plugin options')
-    })
-
-    it('should reject prefix longer than 255 characters', async () => {
-      const tooLong = 'a'.repeat(256)
-      await expect(
-        server.register({
-          plugin,
-          options: { prefix: tooLong }
-        })
-      ).rejects.toThrow('Invalid plugin options')
-    })
-  })
-
-  describe('route versioning', () => {
-    it('should add default version and prefix to routes', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should add custom version and prefix to routes', async () => {
+    it('should register with default options', async () => {
       await server.register({
         plugin,
-        options: { version: 'v2', prefix: 'service' }
+        options: {}
       })
 
-      server.route({
-        method: 'GET',
-        path: '/users',
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/service/v2/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
+      expect(server.plugins.rati).toBeDefined()
     })
 
-    it('should handle routes with nested paths', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users/{id}/posts',
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/users/123/posts'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should handle root path', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/',
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/v1'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should handle empty prefix', async () => {
+    it('should register with custom rate limit options', async () => {
       await server.register({
         plugin,
-        options: { prefix: '', version: 'v1' }
-      })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/v1/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should handle empty version', async () => {
-      await server.register({
-        plugin,
-        options: { prefix: 'api', version: '' }
-      })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should handle both prefix and version empty', async () => {
-      await server.register({
-        plugin,
-        options: { prefix: '', version: '' }
-      })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-  })
-
-  describe('route-level overrides', () => {
-    it('should ignore route-specific version override (global prefix applies)', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
         options: {
-          plugins: {
-            rati: { version: 'v2' }
+          rateLimit: {
+            points: 10,
+            duration: 30
           }
-        },
-        handler: () => ({ success: true })
+        }
       })
 
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
+      expect(server.plugins.rati).toBeDefined()
     })
 
-    it('should ignore route-specific prefix override (global prefix applies)', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: {
-          plugins: {
-            rati: { prefix: 'service' }
-          }
-        },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should ignore both route-specific prefix and version overrides', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: {
-          plugins: {
-            rati: { prefix: 'service', version: 'v3' }
-          }
-        },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should ignore empty version override at route level', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: {
-          plugins: {
-            rati: { version: '' }
-          }
-        },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should expose alias path for route-specific version override', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: { plugins: { rati: { version: 'v2' } } },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/api/v2/users' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should expose alias path for route-specific prefix override', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: { plugins: { rati: { prefix: 'service' } } },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/service/v1/users' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should expose alias path for both prefix and version overrides', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: { plugins: { rati: { prefix: 'service', version: 'v3' } } },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/service/v3/users' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should not duplicate alias when override equals global', async () => {
-      await server.register({ plugin, options: { prefix: 'api', version: 'v1' } })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: { plugins: { rati: { prefix: 'api', version: 'v1' } } },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const table = server.table().filter(r => r.method === 'get' && r.path === '/api/v1/users')
-      expect(table.length).toBe(1)
-
-      const res = await server.inject({ method: 'GET', url: '/api/v1/users' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should expose alias path for empty version override at route level', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: { plugins: { rati: { version: '' } } },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/api/users' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should expose alias path for version override on root path', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/',
-        options: { plugins: { rati: { version: 'v2' } } },
-        handler: () => ({ root: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/api/v2' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ root: true })
-    })
-
-    it('should expose alias path for prefix override on root path', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/',
-        options: { plugins: { rati: { prefix: 'service' } } },
-        handler: () => ({ root: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/service/v1' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ root: true })
-    })
-
-    it('should expose alias when global prefix/version are empty (version override)', async () => {
-      await server.register({ plugin, options: { prefix: '', version: '' } })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: { plugins: { rati: { version: 'v2' } } },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/v2/users' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should expose alias when global prefix/version are empty (prefix override)', async () => {
-      await server.register({ plugin, options: { prefix: '', version: '' } })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: { plugins: { rati: { prefix: 'service' } } },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/service/users' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should expose alias for a route registered before plugin', async () => {
-      // Route added before plugin registration
-      server.route({
-        method: 'GET',
-        path: '/pre',
-        options: { plugins: { rati: { version: 'v2' } } },
-        handler: () => ({ pre: true })
-      })
-
-      await server.register({ plugin })
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/api/v2/pre' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ pre: true })
-    })
-  })
-
-  describe('plugin disabling', () => {
-    it('should not set global prefix when plugin is disabled', async () => {
-      await server.register({ plugin, options: { enabled: false } })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/users' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should not support per-route disabling with false (still prefixed)', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: {
-          plugins: {
-            rati: false
-          }
-        },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should expose unprefixed alias when per-route disabled with false', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: { plugins: { rati: false } },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/users' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-
-    it('should not support per-route disabling with enabled: false (still prefixed)', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/health',
-        options: {
-          plugins: {
-            rati: { enabled: false }
-          }
-        },
-        handler: () => ({ status: 'ok' })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/health'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ status: 'ok' })
-    })
-
-    it('should expose unprefixed alias when per-route disabled with enabled: false', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/health',
-        options: { plugins: { rati: { enabled: false } } },
-        handler: () => ({ status: 'ok' })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/health' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ status: 'ok' })
-    })
-
-    it('should expose unprefixed alias on root path when per-route disabled', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/',
-        options: { plugins: { rati: false } },
-        handler: () => ({ root: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({ method: 'GET', url: '/' })
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ root: true })
-    })
-
-    it('should version routes normally when enabled is true', async () => {
-      await server.register({ plugin })
-
-      server.route({
-        method: 'GET',
-        path: '/users',
-        options: {
-          plugins: {
-            rati: { enabled: true }
-          }
-        },
-        handler: () => ({ success: true })
-      })
-
-      await server.initialize()
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/users'
-      })
-
-      expect(res.statusCode).toBe(200)
-      expect(res.result).toEqual({ success: true })
-    })
-  })
-
-  describe('mixed routes', () => {
-    it('should version all routes when plugin is registered (no per-route disable)', async () => {
-      await server.register({ plugin })
-
-      server.route([
-        {
-          method: 'GET',
-          path: '/users',
-          handler: () => ({ versioned: true })
-        },
-        {
-          method: 'GET',
-          path: '/health',
+    it('should reject invalid options', async () => {
+      await expect(
+        server.register({
+          plugin,
           options: {
-            plugins: {
-              rati: false
+            rateLimit: {
+              points: -1
             }
-          },
-          handler: () => ({ health: 'ok' })
+          }
+        })
+      ).rejects.toThrow()
+    })
+  })
+
+  describe('IP-based rate limiting', () => {
+    beforeEach(async () => {
+      await server.register({
+        plugin,
+        options: {
+          rateLimit: {
+            points: 3,
+            duration: 60
+          }
         }
-      ])
-
-      await server.initialize()
-
-      const versionedRes = await server.inject({
-        method: 'GET',
-        url: '/api/v1/users'
       })
-      expect(versionedRes.statusCode).toBe(200)
-      expect(versionedRes.result).toEqual({ versioned: true })
 
-      const healthRes = await server.inject({
+      server.route({
         method: 'GET',
-        url: '/api/v1/health'
+        path: '/test',
+        handler: () => ({ success: true })
       })
-      expect(healthRes.statusCode).toBe(200)
-      expect(healthRes.result).toEqual({ health: 'ok' })
     })
 
-    it('should ignore different version overrides and use global', async () => {
-      await server.register({ plugin })
+    it('should allow requests under the rate limit', async () => {
+      const res1 = await server.inject({ method: 'GET', url: '/test' })
+      const res2 = await server.inject({ method: 'GET', url: '/test' })
+      const res3 = await server.inject({ method: 'GET', url: '/test' })
 
-      server.route([
-        {
-          method: 'GET',
-          path: '/users',
-          handler: () => ({ version: 'default' })
-        },
-        {
-          method: 'GET',
-          path: '/posts',
-          options: {
-            plugins: {
-              rati: { version: 'v2' }
-            }
-          },
-          handler: () => ({ version: 'v2' })
-        }
-      ])
-
-      await server.initialize()
-
-      const v1Res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/users'
-      })
-      expect(v1Res.statusCode).toBe(200)
-      expect(v1Res.result).toEqual({ version: 'default' })
-
-      const v2Res = await server.inject({
-        method: 'GET',
-        url: '/api/v1/posts'
-      })
-      expect(v2Res.statusCode).toBe(200)
-      expect(v2Res.result).toEqual({ version: 'v2' })
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+      expect(res3.statusCode).toBe(200)
     })
 
-    it('should expose alias for routes with different version overrides', async () => {
-      await server.register({ plugin })
+    it('should block requests over the rate limit', async () => {
+      await server.inject({ method: 'GET', url: '/test' })
+      await server.inject({ method: 'GET', url: '/test' })
+      await server.inject({ method: 'GET', url: '/test' })
+      const res = await server.inject({ method: 'GET', url: '/test' })
 
-      server.route([
-        { method: 'GET', path: '/users', handler: () => ({ version: 'default' }) },
-        {
-          method: 'GET',
-          path: '/posts',
-          options: { plugins: { rati: { version: 'v2' } } },
-          handler: () => ({ version: 'v2' })
+      expect(res.statusCode).toBe(429)
+      expect(res.result).toHaveProperty('error', 'Too Many Requests')
+      expect(res.headers).toHaveProperty('x-ratelimit-limit', '3')
+      expect(res.headers).toHaveProperty('x-ratelimit-remaining', '0')
+      expect(res.headers).toHaveProperty('retry-after')
+    })
+
+    it('should include rate limit headers', async () => {
+      const res = await server.inject({ method: 'GET', url: '/test' })
+
+      expect(res.headers).toHaveProperty('x-ratelimit-limit', '3')
+      expect(res.headers).toHaveProperty('x-ratelimit-remaining', '2')
+      expect(res.headers).toHaveProperty('x-ratelimit-reset')
+    })
+
+    it('should track different IPs separately', async () => {
+      const res1 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        remoteAddress: '192.168.1.1'
+      })
+      const res2 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        remoteAddress: '192.168.1.2'
+      })
+
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+    })
+  })
+
+  describe('IP allow/block lists', () => {
+    it('should bypass rate limiting for allowed IPs', async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: {
+            allowList: ['127.0.0.1']
+          },
+          rateLimit: {
+            points: 1,
+            duration: 60
+          }
         }
-      ])
+      })
 
-      await server.initialize()
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
 
-      const v2Res = await server.inject({ method: 'GET', url: '/api/v2/posts' })
-      expect(v2Res.statusCode).toBe(200)
-      expect(v2Res.result).toEqual({ version: 'v2' })
+      const res1 = await server.inject({ method: 'GET', url: '/test' })
+      const res2 = await server.inject({ method: 'GET', url: '/test' })
+      const res3 = await server.inject({ method: 'GET', url: '/test' })
+
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+      expect(res3.statusCode).toBe(200)
+    })
+
+    it('should block requests from blocked IPs', async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: {
+            blockList: ['192.168.1.100']
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        remoteAddress: '192.168.1.100'
+      })
+
+      expect(res.statusCode).toBe(403)
+      expect(res.result).toHaveProperty('error', 'Forbidden')
+    })
+  })
+
+  describe('X-Forwarded-For support', () => {
+    it('should use X-Forwarded-For when enabled', async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: {
+            allowXForwardedFor: true
+          },
+          rateLimit: {
+            points: 2,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-forwarded-for': '10.0.0.1' }
+      })
+      await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-forwarded-for': '10.0.0.1' }
+      })
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-forwarded-for': '10.0.0.1' }
+      })
+
+      expect(res.statusCode).toBe(429)
+    })
+
+    it('should trust X-Forwarded-For only from allowed sources', async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: {
+            allowXForwardedFor: true,
+            allowXForwardedForFrom: ['127.0.0.1']
+          },
+          rateLimit: {
+            points: 1,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const res1 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-forwarded-for': '10.0.0.1' },
+        remoteAddress: '127.0.0.1'
+      })
+
+      const res2 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-forwarded-for': '10.0.0.1' },
+        remoteAddress: '127.0.0.1'
+      })
+
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(429)
+    })
+  })
+
+  describe('API key-based rate limiting', () => {
+    beforeEach(async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            headerName: 'x-api-key'
+          },
+          rateLimit: {
+            points: 2,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+    })
+
+    it('should rate limit by API key from header', async () => {
+      await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'key123' }
+      })
+      await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'key123' }
+      })
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'key123' }
+      })
+
+      expect(res.statusCode).toBe(429)
+    })
+
+    it('should rate limit by API key from query parameter', async () => {
+      await server.inject({ method: 'GET', url: '/test?api_key=key456' })
+      await server.inject({ method: 'GET', url: '/test?api_key=key456' })
+      const res = await server.inject({ method: 'GET', url: '/test?api_key=key456' })
+
+      expect(res.statusCode).toBe(429)
+    })
+
+    it('should track different API keys separately', async () => {
+      const res1 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'key1' }
+      })
+      const res2 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'key2' }
+      })
+
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+    })
+
+    it('should bypass rate limiting for allowed API keys', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            allowList: ['premium-key']
+          },
+          rateLimit: {
+            points: 1,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const res1 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'premium-key' }
+      })
+      const res2 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'premium-key' }
+      })
+
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+    })
+
+    it('should block requests with blocked API keys', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            blockList: ['blocked-key']
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'blocked-key' }
+      })
+
+      expect(res.statusCode).toBe(403)
+    })
+  })
+
+  describe('Cookie-based rate limiting', () => {
+    beforeEach(async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          cookie: {
+            cookieName: 'session_id'
+          },
+          rateLimit: {
+            points: 2,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+    })
+
+    it('should rate limit by cookie value', async () => {
+      await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { cookie: 'session_id=abc123' }
+      })
+      await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { cookie: 'session_id=abc123' }
+      })
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { cookie: 'session_id=abc123' }
+      })
+
+      expect(res.statusCode).toBe(429)
+    })
+
+    it('should track different cookies separately', async () => {
+      const res1 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { cookie: 'session_id=session1' }
+      })
+      const res2 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { cookie: 'session_id=session2' }
+      })
+
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+    })
+
+    it('should bypass rate limiting for allowed cookies', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          cookie: {
+            cookieName: 'session_id',
+            allowList: ['vip-session']
+          },
+          rateLimit: {
+            points: 1,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const res1 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { cookie: 'session_id=vip-session' }
+      })
+      const res2 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { cookie: 'session_id=vip-session' }
+      })
+
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+    })
+
+    it('should block requests with blocked cookies', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          cookie: {
+            cookieName: 'session_id',
+            blockList: ['banned-session']
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { cookie: 'session_id=banned-session' }
+      })
+
+      expect(res.statusCode).toBe(403)
+    })
+  })
+
+  describe('reset method', () => {
+    it('should reset rate limiting storage', async () => {
+      await server.register({
+        plugin,
+        options: {
+          rateLimit: {
+            points: 1,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      // Consume the limit
+      await server.inject({ method: 'GET', url: '/test' })
+      let res = await server.inject({ method: 'GET', url: '/test' })
+      expect(res.statusCode).toBe(429)
+
+      // Reset and try again
+      await server.plugins.rati.reset()
+      res = await server.inject({ method: 'GET', url: '/test' })
+      expect(res.statusCode).toBe(200)
+    })
+  })
+
+  describe('multiple identification methods', () => {
+    it('should prioritize IP over key when both enabled', async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: true,
+          key: true,
+          rateLimit: {
+            points: 1,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'key123' }
+      })
+
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'different-key' }
+      })
+
+      // Should be rate limited because both use same IP
+      expect(res.statusCode).toBe(429)
+    })
+
+    it('should use key when IP disabled', async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: true,
+          rateLimit: {
+            points: 1,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'key123' }
+      })
+
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: { 'x-api-key': 'different-key' }
+      })
+
+      // Should NOT be rate limited because different keys
+      expect(res.statusCode).toBe(200)
     })
   })
 })
