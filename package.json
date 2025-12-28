@@ -1,5 +1,5 @@
 {
-  "name": "rati",
+  "name": "ratli",
   "version": "0.1.0",
   "description": "A Hapi.js plugin for rate limiting.",
   "main": "dist/index.js",
@@ -19,10 +19,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/johnwatson484/rati.git"
+    "url": "git+https://github.com/johnwatson484/ratli.git"
   },
   "keywords": [
-    "rati",
+    "ratli",
     "hapi",
     "hapi.js",
     "plugin",
@@ -34,9 +34,9 @@
   "license": "MIT",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/johnwatson484/rati/issues"
+    "url": "https://github.com/johnwatson484/ratli/issues"
   },
-  "homepage": "https://github.com/johnwatson484/rati#readme",
+  "homepage": "https://github.com/johnwatson484/ratli#readme",
   "devDependencies": {
     "@hapi/hapi": "21.4.4",
     "@types/node": "25.0.3",

@@ -4,13 +4,13 @@ import plugin from '../src/index'
 
 declare module '@hapi/hapi' {
   interface PluginProperties {
-    rati: {
+    ratli: {
       reset: () => Promise<void>
     }
   }
 }
 
-describe('rati', () => {
+describe('ratli', () => {
   let server: Server
 
   beforeEach(async () => {
@@ -28,7 +28,7 @@ describe('rati', () => {
         options: {}
       })
 
-      expect(server.plugins.rati).toBeDefined()
+      expect(server.plugins.ratli).toBeDefined()
     })
 
     it('should register with custom rate limit options', async () => {
@@ -42,7 +42,7 @@ describe('rati', () => {
         }
       })
 
-      expect(server.plugins.rati).toBeDefined()
+      expect(server.plugins.ratli).toBeDefined()
     })
 
     it('should reject invalid options', async () => {
@@ -435,7 +435,7 @@ describe('rati', () => {
       expect(res.statusCode).toBe(429)
 
       // Reset and try again
-      await server.plugins.rati.reset()
+      await server.plugins.ratli.reset()
       res = await server.inject({ method: 'GET', url: '/test' })
       expect(res.statusCode).toBe(200)
     })

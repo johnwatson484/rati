@@ -7,13 +7,13 @@ const plugin = module.default || module
 
 declare module '@hapi/hapi' {
   interface PluginProperties {
-    rati: {
+    ratli: {
       reset: () => Promise<void>
     }
   }
 }
 
-describe('rati (CommonJS)', () => {
+describe('ratli (CommonJS)', () => {
   let server: Server
 
   beforeEach(async () => {
@@ -30,7 +30,7 @@ describe('rati (CommonJS)', () => {
       options: {}
     })
 
-    expect(server.plugins.rati).toBeDefined()
+    expect(server.plugins.ratli).toBeDefined()
   })
 
   it('should rate limit requests with CommonJS build', async () => {
@@ -80,7 +80,7 @@ describe('rati (CommonJS)', () => {
     let res = await server.inject({ method: 'GET', url: '/test' })
     expect(res.statusCode).toBe(429)
 
-    await server.plugins.rati.reset()
+    await server.plugins.ratli.reset()
     res = await server.inject({ method: 'GET', url: '/test' })
     expect(res.statusCode).toBe(200)
   })

@@ -1,18 +1,18 @@
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=johnwatson484_rati&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=johnwatson484_rati)
-[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=johnwatson484_rati&metric=bugs)](https://sonarcloud.io/summary/new_code?id=johnwatson484_rati)
-[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=johnwatson484_rati&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=johnwatson484_rati)
-[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=johnwatson484_rati&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=johnwatson484_rati)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=johnwatson484_rati&metric=coverage)](https://sonarcloud.io/summary/new_code?id=johnwatson484_rati)
-[![Known Vulnerabilities](https://snyk.io/test/github/johnwatson484/rati/badge.svg)](https://snyk.io/test/github/johnwatson484/rati)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=johnwatson484_ratli&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=johnwatson484_ratli)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=johnwatson484_ratli&metric=bugs)](https://sonarcloud.io/summary/new_code?id=johnwatson484_ratli)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=johnwatson484_ratli&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=johnwatson484_ratli)
+[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=johnwatson484_ratli&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=johnwatson484_ratli)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=johnwatson484_ratli&metric=coverage)](https://sonarcloud.io/summary/new_code?id=johnwatson484_ratli)
+[![Known Vulnerabilities](https://snyk.io/test/github/johnwatson484/ratli/badge.svg)](https://snyk.io/test/github/johnwatson484/ratli)
 
-# Rati
+# Ratli
 
 A Hapi.js plugin for flexible rate limiting with support for multiple identification methods, allow/block lists, and automatic header injection.
 
 ## Installation
 
 ```bash
-npm install rati
+npm install ratli
 ```
 
 ## Features
@@ -33,11 +33,11 @@ By default, the plugin rate limits by IP address with 100 requests per 60 second
 
 ```javascript
 import Hapi from '@hapi/hapi'
-import Rati from 'rati'
+import Ratli from 'ratli'
 
 const server = Hapi.server({ port: 3000 })
 
-await server.register({ plugin: Rati })
+await server.register({ plugin: Ratli })
 
 server.route({
   method: 'GET',
@@ -56,7 +56,7 @@ Configure the number of requests and time window:
 
 ```javascript
 await server.register({
-  plugin: Rati,
+  plugin: Ratli,
   options: {
     rateLimit: {
       points: 10,      // 10 requests
@@ -74,7 +74,7 @@ Rate limit by API key instead of IP address:
 
 ```javascript
 await server.register({
-  plugin: Rati,
+  plugin: Ratli,
   options: {
     ip: false,
     key: {
@@ -146,7 +146,7 @@ Bypass rate limiting for specific API keys:
 
 ```javascript
 await server.register({
-  plugin: Rati,
+  plugin: Ratli,
   options: {
     ip: false,
     key: {
@@ -169,7 +169,7 @@ Block specific IP addresses:
 
 ```javascript
 await server.register({
-  plugin: Rati,
+  plugin: Ratli,
   options: {
     ip: {
       blockList: ['192.168.1.100', '10.0.0.50']
@@ -185,7 +185,7 @@ Trust X-Forwarded-For header only from your load balancer:
 
 ```javascript
 await server.register({
-  plugin: Rati,
+  plugin: Ratli,
   options: {
     ip: {
       allowXForwardedFor: true,
@@ -202,7 +202,7 @@ Rate limit by IP, but allow API key overrides:
 
 ```javascript
 await server.register({
-  plugin: Rati,
+  plugin: Ratli,
   options: {
     ip: true,  // Primary rate limiting by IP
     key: {     // API keys can bypass if in allowList
@@ -220,7 +220,7 @@ Require API keys and avoid falling back to IP when keys are missing:
 
 ```javascript
 await server.register({
-  plugin: Rati,
+  plugin: Ratli,
   options: {
     ip: false,
     key: {
@@ -245,7 +245,7 @@ You can register multiple instances or use allow lists strategically:
 ```javascript
 // Basic tier: IP-based
 await server.register({
-  plugin: Rati,
+  plugin: Ratli,
   options: {
     ip: true,
     rateLimit: {
@@ -313,7 +313,7 @@ The plugin exposes a `reset()` method for clearing rate limit storage in tests:
 
 ```javascript
 // In your tests
-await server.plugins.rati.reset()
+await server.plugins.ratli.reset()
 // All rate limit counters are cleared
 ```
 
@@ -323,11 +323,11 @@ The plugin includes full TypeScript definitions:
 
 ```typescript
 import { Server } from '@hapi/hapi'
-import Rati, { RatiPluginOptions } from 'rati'
+import Ratli, { RatliPluginOptions } from 'ratli'
 
 const server: Server = Hapi.server({ port: 3000 })
 
-const options: RatiPluginOptions = {
+const options: RatliPluginOptions = {
   ip: {
     allowList: ['127.0.0.1'],
     allowXForwardedFor: true
@@ -339,7 +339,7 @@ const options: RatiPluginOptions = {
   }
 }
 
-await server.register({ plugin: Rati, options })
+await server.register({ plugin: Ratli, options })
 ```
 
 ## License

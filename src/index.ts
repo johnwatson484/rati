@@ -2,9 +2,9 @@ import { Server, type Plugin, type ReqRefDefaults, type Request } from '@hapi/ha
 import { applyToDefaults } from '@hapi/hoek'
 import Joi from 'joi'
 
-interface RatiPluginOptions {
-  ip?: boolean | RatiIpPluginOptions
-  key?: boolean | RatiKeyPluginOptions
+interface RatliPluginOptions {
+  ip?: boolean | RatliIpPluginOptions
+  key?: boolean | RatliKeyPluginOptions
   storage?: {
     type: 'memory'
     options?: Record<string, any>
@@ -16,14 +16,14 @@ interface RatiPluginOptions {
   }
 }
 
-interface RatiIpPluginOptions {
+interface RatliIpPluginOptions {
   allowList?: string[]
   blockList?: string[]
   allowXForwardedFor?: boolean
   allowXForwardedForFrom?: string[]
 }
 
-interface RatiKeyPluginOptions {
+interface RatliKeyPluginOptions {
   allowList?: string[]
   blockList?: string[]
   headerName?: string
@@ -31,7 +31,7 @@ interface RatiKeyPluginOptions {
   fallbackToIpOnMissingKey?: boolean
 }
 
-const defaultOptions: RatiPluginOptions = {
+const defaultOptions: RatliPluginOptions = {
   ip: true,
   key: false,
   storage: {
@@ -148,19 +148,19 @@ class MemoryStorage {
   }
 }
 
-const plugin: Plugin<RatiPluginOptions> = {
-  name: 'rati',
-  register: async function (server: Server, options: RatiPluginOptions = {}) {
+const plugin: Plugin<RatliPluginOptions> = {
+  name: 'ratli',
+  register: async function (server: Server, options: RatliPluginOptions = {}) {
     const { error, value } = optionsSchema.validate(options)
 
     if (error) {
       throw new Error(`Invalid plugin options: ${error.message}`)
     }
 
-    const mergedOptions: RatiPluginOptions = applyToDefaults(defaultOptions, value)
+    const mergedOptions: RatliPluginOptions = applyToDefaults(defaultOptions, value)
     const storage = new MemoryStorage()
 
-    const getClientIp = (request: Request<ReqRefDefaults>, ipOptions: RatiIpPluginOptions): string => {
+    const getClientIp = (request: Request<ReqRefDefaults>, ipOptions: RatliIpPluginOptions): string => {
       let clientIp = request.info.remoteAddress
 
       if (ipOptions.allowXForwardedFor) {
@@ -272,7 +272,7 @@ const plugin: Plugin<RatiPluginOptions> = {
         // Store rate limit info on request for later use
         const reqAny = request as any
         reqAny.plugins = reqAny.plugins || {}
-        reqAny.plugins.rati = {
+        reqAny.plugins.ratli = {
           limit: points,
           remaining,
           reset: resetDate.toISOString()
@@ -316,7 +316,7 @@ const plugin: Plugin<RatiPluginOptions> = {
       }
 
       // Add rate limit headers to successful responses
-      const ratiInfo = (request as any).plugins?.rati
+      const ratiInfo = (request as any).plugins?.ratli
       if (ratiInfo && response && typeof response === 'object' && 'header' in response) {
         (response as any).header('X-RateLimit-Limit', ratiInfo.limit.toString())
         ;(response as any).header('X-RateLimit-Remaining', ratiInfo.remaining.toString())
@@ -335,4 +335,4 @@ const plugin: Plugin<RatiPluginOptions> = {
 
 export default plugin
 
-export type { RatiPluginOptions, RatiIpPluginOptions, RatiKeyPluginOptions }
+export type { RatliPluginOptions, RatliIpPluginOptions, RatliKeyPluginOptions }
