@@ -5,7 +5,6 @@ import Joi from 'joi'
 interface RatiPluginOptions {
   ip?: boolean | RatiIpPluginOptions
   key?: boolean | RatiKeyPluginOptions
-  cookie?: boolean | RatiCookiePluginOptions
   storage?: {
     type: 'memory' | 'catbox'
     options?: Record<string, any>
@@ -31,16 +30,9 @@ interface RatiKeyPluginOptions {
   queryParamName?: string
 }
 
-interface RatiCookiePluginOptions {
-  allowList?: string[]
-  blockList?: string[]
-  cookieName?: string
-}
-
 const defaultOptions: RatiPluginOptions = {
   ip: true,
   key: false,
-  cookie: false,
   storage: {
     type: 'memory'
   },
@@ -68,14 +60,6 @@ const optionsSchema = Joi.object({
       blockList: Joi.array().items(Joi.string()).default([]),
       headerName: Joi.string().default('x-api-key'),
       queryParamName: Joi.string().default('api_key')
-    })
-  ).default(false),
-  cookie: Joi.alternatives().try(
-    Joi.boolean(),
-    Joi.object({
-      allowList: Joi.array().items(Joi.string()).default([]),
-      blockList: Joi.array().items(Joi.string()).default([]),
-      cookieName: Joi.string().default('api_key')
     })
   ).default(false),
   storage: Joi.object({
@@ -106,7 +90,6 @@ class MemoryStorage {
     const entry = this.storage.get(key)
 
     if (!entry || entry.resetTime <= now) {
-      // New entry or expired entry
       const resetTime = now + (duration * 1000)
       this.storage.set(key, {
         points: points - 1,
@@ -119,7 +102,6 @@ class MemoryStorage {
       }
     }
 
-    // Existing entry
     if (entry.points <= 0) {
       return {
         success: false,
@@ -129,6 +111,7 @@ class MemoryStorage {
     }
 
     entry.points--
+
     return {
       success: true,
       remainingPoints: entry.points,
@@ -221,31 +204,6 @@ const plugin: Plugin<RatiPluginOptions> = {
       return `key:${apiKey}`
     }
 
-    const checkCookieIdentifier = (request: Request<ReqRefDefaults>): string | null | undefined => {
-      const cookieOptions = typeof mergedOptions.cookie === 'object' ? mergedOptions.cookie : {}
-      const cookieName = cookieOptions.cookieName || 'api_key'
-      const cookieValue = request.state[cookieName]
-
-      if (!cookieValue) {
-        return undefined // No cookie found, try other methods
-      }
-
-      const cookieStr = typeof cookieValue === 'string' ? cookieValue : String(cookieValue)
-
-      if (cookieOptions.allowList && cookieOptions.allowList.length > 0) {
-        if (cookieOptions.allowList.includes(cookieStr)) {
-          return null // Bypass rate limiting
-        }
-        // Cookie exists but not in allow list - still rate limit by cookie
-      }
-
-      if (cookieOptions.blockList && cookieOptions.blockList.length > 0 && cookieOptions.blockList.includes(cookieStr)) {
-        throw new Error('Blocked cookie value')
-      }
-
-      return `cookie:${cookieStr}`
-    }
-
     const getClientIdentifier = (request: Request<ReqRefDefaults>): string | null => {
       if (mergedOptions.ip) {
         return checkIpIdentifier(request)
@@ -256,13 +214,6 @@ const plugin: Plugin<RatiPluginOptions> = {
         if (keyId === null) return null // Bypass rate limiting
         if (keyId) return keyId // Use key for rate limiting
         // keyId is undefined, continue to check other methods
-      }
-
-      if (mergedOptions.cookie) {
-        const cookieId = checkCookieIdentifier(request)
-        if (cookieId === null) return null // Bypass rate limiting
-        if (cookieId) return cookieId // Use cookie for rate limiting
-        // cookieId is undefined, continue to check other methods
       }
 
       // Only fall back to IP if IP mode is not explicitly disabled
@@ -318,7 +269,7 @@ const plugin: Plugin<RatiPluginOptions> = {
         // Continue with rate limit headers
         return h.continue
       } catch (error) {
-        // Handle blocked IPs/keys/cookies
+        // Handle blocked IPs/keys
         if (error instanceof Error && error.message.startsWith('Blocked')) {
           return h.response({
             statusCode: 403,
@@ -357,4 +308,4 @@ const plugin: Plugin<RatiPluginOptions> = {
 
 export default plugin
 
-export type { RatiPluginOptions, RatiIpPluginOptions, RatiKeyPluginOptions, RatiCookiePluginOptions }
+export type { RatiPluginOptions, RatiIpPluginOptions, RatiKeyPluginOptions }

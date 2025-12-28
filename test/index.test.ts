@@ -2,6 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Server } from '@hapi/hapi'
 import plugin from '../src/index'
 
+declare module '@hapi/hapi' {
+  interface PluginProperties {
+    rati: {
+      reset: () => Promise<void>
+    }
+  }
+}
+
 describe('rati', () => {
   let server: Server
 
@@ -46,7 +54,7 @@ describe('rati', () => {
               points: -1
             }
           }
-        })
+        } as any)
       ).rejects.toThrow()
     })
   })
@@ -385,136 +393,6 @@ describe('rati', () => {
         method: 'GET',
         url: '/test',
         headers: { 'x-api-key': 'blocked-key' }
-      })
-
-      expect(res.statusCode).toBe(403)
-    })
-  })
-
-  describe('Cookie-based rate limiting', () => {
-    beforeEach(async () => {
-      await server.register({
-        plugin,
-        options: {
-          ip: false,
-          cookie: {
-            cookieName: 'session_id'
-          },
-          rateLimit: {
-            points: 2,
-            duration: 60
-          }
-        }
-      })
-
-      server.route({
-        method: 'GET',
-        path: '/test',
-        handler: () => ({ success: true })
-      })
-    })
-
-    it('should rate limit by cookie value', async () => {
-      await server.inject({
-        method: 'GET',
-        url: '/test',
-        headers: { cookie: 'session_id=abc123' }
-      })
-      await server.inject({
-        method: 'GET',
-        url: '/test',
-        headers: { cookie: 'session_id=abc123' }
-      })
-      const res = await server.inject({
-        method: 'GET',
-        url: '/test',
-        headers: { cookie: 'session_id=abc123' }
-      })
-
-      expect(res.statusCode).toBe(429)
-    })
-
-    it('should track different cookies separately', async () => {
-      const res1 = await server.inject({
-        method: 'GET',
-        url: '/test',
-        headers: { cookie: 'session_id=session1' }
-      })
-      const res2 = await server.inject({
-        method: 'GET',
-        url: '/test',
-        headers: { cookie: 'session_id=session2' }
-      })
-
-      expect(res1.statusCode).toBe(200)
-      expect(res2.statusCode).toBe(200)
-    })
-
-    it('should bypass rate limiting for allowed cookies', async () => {
-      await server.stop()
-      server = new Server()
-
-      await server.register({
-        plugin,
-        options: {
-          ip: false,
-          cookie: {
-            cookieName: 'session_id',
-            allowList: ['vip-session']
-          },
-          rateLimit: {
-            points: 1,
-            duration: 60
-          }
-        }
-      })
-
-      server.route({
-        method: 'GET',
-        path: '/test',
-        handler: () => ({ success: true })
-      })
-
-      const res1 = await server.inject({
-        method: 'GET',
-        url: '/test',
-        headers: { cookie: 'session_id=vip-session' }
-      })
-      const res2 = await server.inject({
-        method: 'GET',
-        url: '/test',
-        headers: { cookie: 'session_id=vip-session' }
-      })
-
-      expect(res1.statusCode).toBe(200)
-      expect(res2.statusCode).toBe(200)
-    })
-
-    it('should block requests with blocked cookies', async () => {
-      await server.stop()
-      server = new Server()
-
-      await server.register({
-        plugin,
-        options: {
-          ip: false,
-          cookie: {
-            cookieName: 'session_id',
-            blockList: ['banned-session']
-          }
-        }
-      })
-
-      server.route({
-        method: 'GET',
-        path: '/test',
-        handler: () => ({ success: true })
-      })
-
-      const res = await server.inject({
-        method: 'GET',
-        url: '/test',
-        headers: { cookie: 'session_id=banned-session' }
       })
 
       expect(res.statusCode).toBe(403)

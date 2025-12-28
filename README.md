@@ -17,7 +17,7 @@ npm install rati
 
 ## Features
 
-- **Multiple Identification Methods**: Rate limit by IP address, API key, or cookie
+- **Multiple Identification Methods**: Rate limit by IP address or API key
 - **Flexible Allow/Block Lists**: Bypass or block specific clients
 - **Standard Rate Limit Headers**: Automatically adds `X-RateLimit-*` headers to responses
 - **Memory Storage**: Built-in in-memory storage with automatic expiration
@@ -96,27 +96,6 @@ server.route({
 // Rate limited by x-api-key header or api_key query parameter
 ```
 
-### Cookie-Based Rate Limiting
-
-Rate limit by cookie value:
-
-```javascript
-await server.register({
-  plugin: Rati,
-  options: {
-    ip: false,
-    cookie: {
-      cookieName: 'session_id'
-    },
-    rateLimit: {
-      points: 50,
-      duration: 300  // 50 requests per 5 minutes per session
-    }
-  }
-})
-// Rate limited by session_id cookie
-```
-
 ## Configuration
 
 ### Global Options
@@ -125,7 +104,6 @@ await server.register({
 |--------|------|---------|-------------|
 | `ip` | `boolean \| object` | `true` | Enable IP-based rate limiting or configure IP options |
 | `key` | `boolean \| object` | `false` | Enable API key-based rate limiting or configure key options |
-| `cookie` | `boolean \| object` | `false` | Enable cookie-based rate limiting or configure cookie options |
 | `storage` | `object` | `{ type: 'memory' }` | Storage configuration (currently only 'memory' supported) |
 | `rateLimit` | `object` | See below | Rate limit configuration |
 
@@ -158,16 +136,6 @@ When `key` is an object, you can configure:
 | `blockList` | `string[]` | `[]` | API keys that are always blocked (403) |
 | `headerName` | `string` | `'x-api-key'` | Header name to check for API key |
 | `queryParamName` | `string` | `'api_key'` | Query parameter name for API key |
-
-### Cookie Options
-
-When `cookie` is an object, you can configure:
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `allowList` | `string[]` | `[]` | Cookie values that bypass rate limiting |
-| `blockList` | `string[]` | `[]` | Cookie values that are always blocked (403) |
-| `cookieName` | `string` | `'api_key'` | Cookie name to use for identification |
 
 ## Examples
 
@@ -297,7 +265,6 @@ When multiple identification methods are enabled, the priority is:
 
 1. **IP** (if `ip: true` or `ip: { ... }`)
 2. **API Key** (if `key: true` or `key: { ... }` and `ip: false`)
-3. **Cookie** (if `cookie: true` or `cookie: { ... }` and `ip: false` and no API key found)
 
 If no identifier is found, the plugin falls back to IP address.
 
