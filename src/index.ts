@@ -6,7 +6,7 @@ interface RatiPluginOptions {
   ip?: boolean | RatiIpPluginOptions
   key?: boolean | RatiKeyPluginOptions
   storage?: {
-    type: 'memory' | 'catbox'
+    type: 'memory'
     options?: Record<string, any>
   }
   rateLimit?: {
@@ -28,6 +28,7 @@ interface RatiKeyPluginOptions {
   blockList?: string[]
   headerName?: string
   queryParamName?: string
+  fallbackToIpOnMissingKey?: boolean
 }
 
 const defaultOptions: RatiPluginOptions = {
@@ -59,11 +60,12 @@ const optionsSchema = Joi.object({
       allowList: Joi.array().items(Joi.string()).default([]),
       blockList: Joi.array().items(Joi.string()).default([]),
       headerName: Joi.string().default('x-api-key'),
-      queryParamName: Joi.string().default('api_key')
+      queryParamName: Joi.string().default('api_key'),
+      fallbackToIpOnMissingKey: Joi.boolean().default(true)
     })
   ).default(false),
   storage: Joi.object({
-    type: Joi.string().valid('memory', 'catbox').default('memory'),
+    type: Joi.string().valid('memory').default('memory'),
     options: Joi.object().default({})
   }).default(),
   rateLimit: Joi.object({
@@ -76,6 +78,7 @@ const optionsSchema = Joi.object({
 interface RateLimitEntry {
   points: number
   resetTime: number
+  blockedUntil?: number
 }
 
 class MemoryStorage {
@@ -85,7 +88,7 @@ class MemoryStorage {
     this.storage = new Map()
   }
 
-  async consume (key: string, points: number, duration: number): Promise<{ success: boolean, remainingPoints: number, resetTime: number }> {
+  async consume (key: string, points: number, duration: number, blockDuration: number): Promise<{ success: boolean, remainingPoints: number, resetTime: number }> {
     const now = Date.now()
     const entry = this.storage.get(key)
 
@@ -93,7 +96,8 @@ class MemoryStorage {
       const resetTime = now + (duration * 1000)
       this.storage.set(key, {
         points: points - 1,
-        resetTime
+        resetTime,
+        blockedUntil: undefined
       })
       return {
         success: true,
@@ -102,7 +106,23 @@ class MemoryStorage {
       }
     }
 
+    if (entry.blockedUntil && entry.blockedUntil > now) {
+      return {
+        success: false,
+        remainingPoints: 0,
+        resetTime: entry.blockedUntil
+      }
+    }
+
     if (entry.points <= 0) {
+      if (blockDuration > 0) {
+        entry.blockedUntil = now + (blockDuration * 1000)
+        return {
+          success: false,
+          remainingPoints: 0,
+          resetTime: entry.blockedUntil
+        }
+      }
       return {
         success: false,
         remainingPoints: 0,
@@ -204,7 +224,7 @@ const plugin: Plugin<RatiPluginOptions> = {
       return `key:${apiKey}`
     }
 
-    const getClientIdentifier = (request: Request<ReqRefDefaults>): string | null => {
+    const getClientIdentifier = (request: Request<ReqRefDefaults>): string | null | undefined => {
       if (mergedOptions.ip) {
         return checkIpIdentifier(request)
       }
@@ -216,13 +236,15 @@ const plugin: Plugin<RatiPluginOptions> = {
         // keyId is undefined, continue to check other methods
       }
 
-      // Only fall back to IP if IP mode is not explicitly disabled
-      if (mergedOptions.ip !== false) {
+      // Fallback to IP only if not explicitly disabled and allowed by key options
+      const keyOptions = typeof mergedOptions.key === 'object' ? mergedOptions.key : undefined
+      const allowFallback = keyOptions?.fallbackToIpOnMissingKey ?? true
+      if (mergedOptions.ip !== false && allowFallback) {
         return `ip:${request.info.remoteAddress}`
       }
 
-      // If ip is explicitly false and no other identifier found, use IP anyway as fallback
-      return `ip:${request.info.remoteAddress}`
+      // No identifier determined
+      return undefined
     }
 
     server.ext('onPreAuth', async (request, h) => {
@@ -234,8 +256,13 @@ const plugin: Plugin<RatiPluginOptions> = {
           return h.continue
         }
 
-        const { points, duration } = mergedOptions.rateLimit!
-        const result = await storage.consume(identifier, points, duration)
+        // If no identifier, do not apply rate limiting
+        if (identifier === undefined) {
+          return h.continue
+        }
+
+        const { points, duration, blockDuration = 300 } = mergedOptions.rateLimit!
+        const result = await storage.consume(identifier, points, duration, blockDuration)
 
         // Set rate limit headers
         const resetDate = new Date(result.resetTime)

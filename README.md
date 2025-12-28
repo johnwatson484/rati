@@ -136,6 +136,7 @@ When `key` is an object, you can configure:
 | `blockList` | `string[]` | `[]` | API keys that are always blocked (403) |
 | `headerName` | `string` | `'x-api-key'` | Header name to check for API key |
 | `queryParamName` | `string` | `'api_key'` | Query parameter name for API key |
+| `fallbackToIpOnMissingKey` | `boolean` | `true` | Fallback to IP-based limiting when no key is provided (only if `ip` is enabled) |
 
 ## Examples
 
@@ -213,6 +214,30 @@ await server.register({
 // Requests with trusted-service-key: unlimited
 ```
 
+### Key-Only Mode Without IP Fallback
+
+Require API keys and avoid falling back to IP when keys are missing:
+
+```javascript
+await server.register({
+  plugin: Rati,
+  options: {
+    ip: false,
+    key: {
+      headerName: 'x-api-key',
+      queryParamName: 'api_key',
+      fallbackToIpOnMissingKey: false
+    },
+    rateLimit: {
+      points: 500,
+      duration: 3600
+    }
+  }
+})
+// Requests must include an API key to be rate limited
+// Missing keys are not rate limited in this configuration
+```
+
 ### Different Limits for Different Tiers
 
 You can register multiple instances or use allow lists strategically:
@@ -253,6 +278,21 @@ X-RateLimit-Reset: 2025-12-27T12:30:00.000Z
 Retry-After: 45
 ```
 
+`Retry-After` reflects the remaining block window when `blockDuration > 0`; otherwise, it reflects the time until the current window resets.
+
+### Block Duration Example
+
+When a client exceeds the limit and `blockDuration` is set (e.g., 120 seconds), subsequent requests during the block window receive:
+
+```
+X-RateLimit-Limit: 10
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 2025-12-27T12:35:00.000Z
+Retry-After: 120
+```
+
+As time progresses within the block window, `Retry-After` decreases accordingly until the block expires.
+
 ## HTTP Status Codes
 
 - **200 OK**: Request successful, under rate limit
@@ -261,12 +301,11 @@ Retry-After: 45
 
 ## Priority of Identification Methods
 
-When multiple identification methods are enabled, the priority is:
+Identification resolution works as follows:
 
-1. **IP** (if `ip: true` or `ip: { ... }`)
-2. **API Key** (if `key: true` or `key: { ... }` and `ip: false`)
-
-If no identifier is found, the plugin falls back to IP address.
+- **IP**: Used when `ip` is enabled (`true` or an object).
+- **API Key**: Used when `ip` is disabled and `key` is enabled (boolean or object). If both are enabled, IP takes precedence.
+- **Fallback**: If no API key is present, fallback to IP occurs only when `ip` is not disabled and `key.fallbackToIpOnMissingKey` is `true`. Otherwise, the request is not rate limited.
 
 ## Testing Support
 
