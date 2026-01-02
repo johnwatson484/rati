@@ -2,6 +2,15 @@ import { Server, type Plugin, type ReqRefDefaults, type Request } from '@hapi/ha
 import { applyToDefaults } from '@hapi/hoek'
 import Joi from 'joi'
 
+const API_KEY_MAX_LENGTH = 512
+const DEFAULT_HEADER_NAME = 'x-api-key'
+const DEFAULT_QUERY_PARAM_NAME = 'api_key'
+const DEFAULT_MAX_STORAGE_SIZE = 10000
+const DEFAULT_CLEANUP_INTERVAL = 60000
+const DEFAULT_RATE_LIMIT_POINTS = 100
+const DEFAULT_RATE_LIMIT_DURATION = 60
+const DEFAULT_BLOCK_DURATION = 300
+
 class BlockedIpError extends Error {
   constructor (ip: string) {
     super(`Blocked IP address: ${ip}`)
@@ -70,14 +79,14 @@ const defaultOptions: RatliPluginOptions = {
   storage: {
     type: 'memory',
     options: {
-      maxSize: 10000,
-      cleanupInterval: 60000
+      maxSize: DEFAULT_MAX_STORAGE_SIZE,
+      cleanupInterval: DEFAULT_CLEANUP_INTERVAL
     }
   },
   rateLimit: {
-    points: 100,
-    duration: 60,
-    blockDuration: 300
+    points: DEFAULT_RATE_LIMIT_POINTS,
+    duration: DEFAULT_RATE_LIMIT_DURATION,
+    blockDuration: DEFAULT_BLOCK_DURATION
   }
 }
 
@@ -96,22 +105,22 @@ const optionsSchema = Joi.object({
     Joi.object({
       allowList: Joi.array().items(Joi.string()).default([]),
       blockList: Joi.array().items(Joi.string()).default([]),
-      headerName: Joi.string().default('x-api-key'),
-      queryParamName: Joi.string().default('api_key'),
+      headerName: Joi.string().default(DEFAULT_HEADER_NAME),
+      queryParamName: Joi.string().default(DEFAULT_QUERY_PARAM_NAME),
       fallbackToIpOnMissingKey: Joi.boolean().default(true)
     })
   ).default(false),
   storage: Joi.object({
     type: Joi.string().valid('memory').default('memory'),
     options: Joi.object({
-      maxSize: Joi.number().integer().min(1).default(10000),
-      cleanupInterval: Joi.number().integer().min(1000).default(60000)
+      maxSize: Joi.number().integer().min(1).default(DEFAULT_MAX_STORAGE_SIZE),
+      cleanupInterval: Joi.number().integer().min(1000).default(DEFAULT_CLEANUP_INTERVAL)
     }).default()
   }).default(),
   rateLimit: Joi.object({
-    points: Joi.number().integer().min(1).default(100),
-    duration: Joi.number().integer().min(1).default(60),
-    blockDuration: Joi.number().integer().min(0).default(300)
+    points: Joi.number().integer().min(1).default(DEFAULT_RATE_LIMIT_POINTS),
+    duration: Joi.number().integer().min(1).default(DEFAULT_RATE_LIMIT_DURATION),
+    blockDuration: Joi.number().integer().min(0).default(DEFAULT_BLOCK_DURATION)
   }).default(),
   onRateLimit: Joi.function().optional(),
   onBlock: Joi.function().optional()
@@ -127,12 +136,14 @@ class MemoryStorage {
   private readonly storage: Map<string, RateLimitEntry>
   private readonly maxSize: number
   private readonly cleanupTimer?: NodeJS.Timeout
+  private oldestKey: string | null = null
+  private oldestTime: number = Infinity
 
   constructor (options: MemoryStorageOptions = {}) {
     this.storage = new Map()
-    this.maxSize = options.maxSize ?? 10000
+    this.maxSize = options.maxSize ?? DEFAULT_MAX_STORAGE_SIZE
 
-    const cleanupInterval = options.cleanupInterval ?? 60000
+    const cleanupInterval = options.cleanupInterval ?? DEFAULT_CLEANUP_INTERVAL
     this.cleanupTimer = setInterval(() => {
       this.cleanup()
     }, cleanupInterval)
@@ -151,10 +162,14 @@ class MemoryStorage {
     for (const key of toDelete) {
       this.storage.delete(key)
     }
+
+    this.updateOldestEntry()
   }
 
-  private evictOldest (): void {
+  private updateOldestEntry (): void {
     if (this.storage.size === 0) {
+      this.oldestKey = null
+      this.oldestTime = Infinity
       return
     }
 
@@ -168,8 +183,18 @@ class MemoryStorage {
       }
     }
 
-    if (oldestKey) {
-      this.storage.delete(oldestKey)
+    this.oldestKey = oldestKey
+    this.oldestTime = oldestTime
+  }
+
+  private evictOldest (): void {
+    if (this.oldestKey === null || !this.storage.has(this.oldestKey)) {
+      this.updateOldestEntry()
+    }
+
+    if (this.oldestKey) {
+      this.storage.delete(this.oldestKey)
+      this.updateOldestEntry()
     }
   }
 
@@ -188,6 +213,11 @@ class MemoryStorage {
         blockedUntil: undefined
       }
       this.storage.set(key, newEntry)
+
+      if (this.oldestKey === null || resetTime < this.oldestTime) {
+        this.oldestKey = key
+        this.oldestTime = resetTime
+      }
 
       return {
         success: true,
@@ -267,14 +297,35 @@ class MemoryStorage {
 
 const isValidIp = (ip: string): boolean => {
   const ipv4Pattern = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/
-  const ipv6Pattern = /^([\dA-Fa-f]{0,4}:){7}[\dA-Fa-f]{0,4}$/
 
   if (ipv4Pattern.test(ip)) {
     const parts = ip.split('.').map(Number)
     return parts.every(part => part >= 0 && part <= 255)
   }
 
-  return ipv6Pattern.test(ip)
+  const ipv6Segment = '[0-9a-fA-F]{1,4}'
+  const hasDoubleColon = ip.includes('::')
+  const hasValidCharacters = /^[0-9a-fA-F:]+$/.test(ip)
+
+  if (!hasValidCharacters) {
+    return false
+  }
+
+  if (hasDoubleColon) {
+    const parts = ip.split('::')
+    if (parts.length > 2) {
+      return false
+    }
+    const segments = ip.split(':').filter(s => s.length > 0)
+    return segments.every(s => new RegExp(`^${ipv6Segment}$`).test(s)) && segments.length <= 8
+  }
+
+  const segments = ip.split(':')
+  if (segments.length !== 8) {
+    return false
+  }
+
+  return segments.every(s => new RegExp(`^${ipv6Segment}$`).test(s))
 }
 
 const sanitizeApiKey = (key: string): string | null => {
@@ -284,7 +335,7 @@ const sanitizeApiKey = (key: string): string | null => {
 
   const trimmed = key.trim()
 
-  if (trimmed.length === 0 || trimmed.length > 512) {
+  if (trimmed.length === 0 || trimmed.length > API_KEY_MAX_LENGTH) {
     return null
   }
 
@@ -320,35 +371,46 @@ const plugin: Plugin<RatliPluginOptions> = {
     const storageOptions = (mergedOptions.storage?.options as MemoryStorageOptions) ?? {}
     const storage = new MemoryStorage(storageOptions)
 
-    const getClientIp = (request: Request<ReqRefDefaults>, ipOptions: RatliIpPluginOptions): string => {
-      let clientIp = request.info.remoteAddress
+    const extractForwardedIps = (forwardedFor: string): string[] => {
+      return forwardedFor.split(',').map((ip: string) => ip.trim()).filter(isValidIp)
+    }
 
-      if (ipOptions.allowXForwardedFor) {
-        const forwardedFor = request.headers['x-forwarded-for']
-        if (forwardedFor) {
-          const ips = forwardedFor.split(',').map((ip: string) => ip.trim()).filter(isValidIp)
-          if (ips.length > 0) {
-            const shouldTrust = ipOptions.allowXForwardedForFrom &&
-              ipOptions.allowXForwardedForFrom.length > 0 &&
-              ipOptions.allowXForwardedForFrom.includes(request.info.remoteAddress)
+    const shouldTrustProxy = (remoteAddress: string, ipOptions: RatliIpPluginOptions): boolean => {
+      return !!(ipOptions.allowXForwardedForFrom &&
+        ipOptions.allowXForwardedForFrom.length > 0 &&
+        ipOptions.allowXForwardedForFrom.includes(remoteAddress))
+    }
 
-            if (shouldTrust) {
-              const trustedProxies = ipOptions.allowXForwardedForFrom || []
-              for (let i = ips.length - 1; i >= 0; i--) {
-                if (!trustedProxies.includes(ips[i])) {
-                  clientIp = ips[i]
-                  break
-                }
-              }
-              if (clientIp === request.info.remoteAddress && ips.length > 0) {
-                clientIp = ips[0]
-              }
-            }
-          }
+    const findClientIpFromChain = (ips: string[], trustedProxies: string[]): string => {
+      for (let i = ips.length - 1; i >= 0; i--) {
+        if (!trustedProxies.includes(ips[i])) {
+          return ips[i]
         }
       }
+      return ips[0]
+    }
 
-      return clientIp
+    const getClientIp = (request: Request<ReqRefDefaults>, ipOptions: RatliIpPluginOptions): string => {
+      if (!ipOptions.allowXForwardedFor) {
+        return request.info.remoteAddress
+      }
+
+      const forwardedFor = request.headers['x-forwarded-for']
+      if (!forwardedFor) {
+        return request.info.remoteAddress
+      }
+
+      const ips = extractForwardedIps(forwardedFor)
+      if (ips.length === 0) {
+        return request.info.remoteAddress
+      }
+
+      if (!shouldTrustProxy(request.info.remoteAddress, ipOptions)) {
+        return request.info.remoteAddress
+      }
+
+      const trustedProxies = ipOptions.allowXForwardedForFrom || []
+      return findClientIpFromChain(ips, trustedProxies)
     }
 
     const checkIpIdentifier = (request: Request<ReqRefDefaults>): string | null => {
@@ -370,8 +432,8 @@ const plugin: Plugin<RatliPluginOptions> = {
 
     const checkKeyIdentifier = (request: Request<ReqRefDefaults>): string | null | undefined => {
       const keyOptions = typeof mergedOptions.key === 'object' ? mergedOptions.key : {}
-      const headerName = keyOptions.headerName || 'x-api-key'
-      const queryParamName = keyOptions.queryParamName || 'api_key'
+      const headerName = keyOptions.headerName || DEFAULT_HEADER_NAME
+      const queryParamName = keyOptions.queryParamName || DEFAULT_QUERY_PARAM_NAME
 
       let apiKey = request.headers[headerName] as string | undefined
       if (!apiKey && request.query[queryParamName]) {
@@ -430,25 +492,60 @@ const plugin: Plugin<RatliPluginOptions> = {
       return undefined
     }
 
+    const invokeCallback = (callback: Function, identifier: string, request: Request<ReqRefDefaults>): void => {
+      try {
+        callback(identifier, request)
+      } catch (err) {
+        server.log(['ratli', 'error'], { error: err })
+      }
+    }
+
+    const handleRateLimitExceeded = (h: any, identifier: string, request: Request<ReqRefDefaults>, result: { resetTime: number }, points: number, now: number) => {
+      if (mergedOptions.onRateLimit) {
+        invokeCallback(mergedOptions.onRateLimit, identifier, request)
+      }
+
+      const retryAfter = Math.ceil((result.resetTime - now) / 1000)
+      return h.response({
+        statusCode: 429,
+        error: 'Too Many Requests',
+        message: 'Rate limit exceeded'
+      })
+        .code(429)
+        .header('RateLimit-Limit', points.toString())
+        .header('RateLimit-Remaining', '0')
+        .header('RateLimit-Reset', Math.floor(result.resetTime / 1000).toString())
+        .header('Retry-After', retryAfter.toString())
+        .takeover()
+    }
+
+    const handleBlockedClient = (h: any, error: Error, request: Request<ReqRefDefaults>) => {
+      if (mergedOptions.onBlock) {
+        const identifier = error instanceof BlockedIpError ? error.message : 'blocked-key'
+        invokeCallback(mergedOptions.onBlock, identifier, request)
+      }
+
+      return h.response({
+        statusCode: 403,
+        error: 'Forbidden',
+        message: 'Access forbidden'
+      }).code(403).takeover()
+    }
+
     server.ext('onPreAuth', async (request, h) => {
       const now = Date.now()
 
       try {
         const identifier = getClientIdentifier(request)
 
-        if (identifier === null) {
+        if (identifier === null || identifier === undefined) {
           return h.continue
         }
 
-        if (identifier === undefined) {
-          return h.continue
-        }
-
-        const { points, duration, blockDuration = 300 } = mergedOptions.rateLimit!
+        const { points, duration, blockDuration = DEFAULT_BLOCK_DURATION } = mergedOptions.rateLimit!
         const result = await storage.consume(identifier, points, duration, blockDuration, now)
 
         const resetDate = new Date(result.resetTime)
-        const retryAfter = Math.ceil((result.resetTime - now) / 1000)
         const remaining = Math.max(0, result.remainingPoints)
 
         request.plugins.ratli = {
@@ -458,44 +555,13 @@ const plugin: Plugin<RatliPluginOptions> = {
         }
 
         if (!result.success) {
-          if (mergedOptions.onRateLimit) {
-            try {
-              mergedOptions.onRateLimit(identifier, request)
-            } catch (err) {
-              server.log(['ratli', 'error'], { error: err })
-            }
-          }
-
-          return h.response({
-            statusCode: 429,
-            error: 'Too Many Requests',
-            message: 'Rate limit exceeded'
-          })
-            .code(429)
-            .header('RateLimit-Limit', points.toString())
-            .header('RateLimit-Remaining', '0')
-            .header('RateLimit-Reset', Math.floor(result.resetTime / 1000).toString())
-            .header('Retry-After', retryAfter.toString())
-            .takeover()
+          return handleRateLimitExceeded(h, identifier, request, result, points, now)
         }
 
         return h.continue
       } catch (error) {
         if (error instanceof BlockedIpError || error instanceof BlockedApiKeyError) {
-          if (mergedOptions.onBlock) {
-            try {
-              const identifier = error instanceof BlockedIpError ? error.message : 'blocked-key'
-              mergedOptions.onBlock(identifier, request)
-            } catch (err) {
-              server.log(['ratli', 'error'], { error: err })
-            }
-          }
-
-          return h.response({
-            statusCode: 403,
-            error: 'Forbidden',
-            message: 'Access forbidden'
-          }).code(403).takeover()
+          return handleBlockedClient(h, error, request)
         }
         throw error
       }
