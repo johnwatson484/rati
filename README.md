@@ -19,10 +19,12 @@ npm install ratli
 
 - **Multiple Identification Methods**: Rate limit by IP address or API key
 - **Flexible Allow/Block Lists**: Bypass or block specific clients
-- **Standard Rate Limit Headers**: Automatically adds `X-RateLimit-*` headers to responses
-- **Memory Storage**: Built-in in-memory storage with automatic expiration
-- **X-Forwarded-For Support**: Trust proxy headers with configurable sources
+- **IETF Standard Headers**: Automatically adds `RateLimit-*` headers to responses
+- **Memory Storage**: Built-in in-memory storage with automatic cleanup and configurable limits
+- **Event Callbacks**: Monitor rate limit violations and blocks with `onRateLimit` and `onBlock` hooks
+- **X-Forwarded-For Support**: Trust proxy headers with configurable sources and IP validation
 - **429 & 403 Responses**: Standard HTTP status codes for rate limiting and blocking
+- **Status Checking**: Query current rate limit status without consuming points
 - **TypeScript Support**: Full type definitions included
 
 ## Usage
@@ -47,7 +49,7 @@ server.route({
 
 await server.start()
 // Requests limited to 100 per minute per IP address
-// Response includes: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
+// Response includes: RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset
 ```
 
 ### Custom Rate Limits
@@ -104,8 +106,10 @@ server.route({
 |--------|------|---------|-------------|
 | `ip` | `boolean \| object` | `true` | Enable IP-based rate limiting or configure IP options |
 | `key` | `boolean \| object` | `false` | Enable API key-based rate limiting or configure key options |
-| `storage` | `object` | `{ type: 'memory' }` | Storage configuration (currently only 'memory' supported) |
+| `storage` | `object` | `{ type: 'memory', options: { maxSize: 10000, cleanupInterval: 60000 } }` | Storage configuration |
 | `rateLimit` | `object` | See below | Rate limit configuration |
+| `onRateLimit` | `function` | `undefined` | Callback fired when rate limit is exceeded: `(identifier, request) => void` |
+| `onBlock` | `function` | `undefined` | Callback fired when a client is blocked: `(identifier, request) => void` |
 
 ### Rate Limit Options
 
@@ -114,6 +118,15 @@ server.route({
 | `points` | `number` | `100` | Number of requests allowed in the time window |
 | `duration` | `number` | `60` | Time window in seconds |
 | `blockDuration` | `number` | `300` | How long to block after exceeding limit (seconds) |
+
+### Storage Options
+
+When configuring `storage.options`:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxSize` | `number` | `10000` | Maximum number of entries to store (LRU eviction when exceeded) |
+| `cleanupInterval` | `number` | `60000` | Interval in milliseconds to clean up expired entries |
 
 ### IP Options
 
@@ -261,20 +274,22 @@ await server.register({
 
 ## Response Headers
 
-The plugin automatically adds standard rate limit headers to all responses:
+The plugin automatically adds IETF standard rate limit headers to all responses:
 
 ```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 2025-12-27T12:30:00.000Z
+RateLimit-Limit: 100
+RateLimit-Remaining: 95
+RateLimit-Reset: 1735301400
 ```
+
+Note: `RateLimit-Reset` is a Unix timestamp (seconds since epoch).
 
 When rate limit is exceeded (429 response):
 
 ```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 0
-X-RateLimit-Reset: 2025-12-27T12:30:00.000Z
+RateLimit-Limit: 100
+RateLimit-Remaining: 0
+RateLimit-Reset: 1735301400
 Retry-After: 45
 ```
 
@@ -285,9 +300,9 @@ Retry-After: 45
 When a client exceeds the limit and `blockDuration` is set (e.g., 120 seconds), subsequent requests during the block window receive:
 
 ```
-X-RateLimit-Limit: 10
-X-RateLimit-Remaining: 0
-X-RateLimit-Reset: 2025-12-27T12:35:00.000Z
+RateLimit-Limit: 10
+RateLimit-Remaining: 0
+RateLimit-Reset: 1735301700
 Retry-After: 120
 ```
 
@@ -307,14 +322,91 @@ Identification resolution works as follows:
 - **API Key**: Used when `ip` is disabled and `key` is enabled (boolean or object). If both are enabled, IP takes precedence.
 - **Fallback**: If no API key is present, fallback to IP occurs only when `ip` is not disabled and `key.fallbackToIpOnMissingKey` is `true`. Otherwise, the request is not rate limited.
 
+## Event Callbacks
+
+Monitor rate limiting events with callback functions:
+
+### onRateLimit Callback
+
+Called when a client exceeds their rate limit:
+
+```javascript
+await server.register({
+  plugin: Ratli,
+  options: {
+    rateLimit: {
+      points: 100,
+      duration: 60
+    },
+    onRateLimit: (identifier, request) => {
+      console.log(`Rate limit exceeded for ${identifier} on ${request.path}`)
+      // Log to your monitoring system, send alerts, etc.
+    }
+  }
+})
+```
+
+### onBlock Callback
+
+Called when a client is blocked (from allow/block lists):
+
+```javascript
+await server.register({
+  plugin: Ratli,
+  options: {
+    ip: {
+      blockList: ['192.168.1.100']
+    },
+    onBlock: (identifier, request) => {
+      console.log(`Blocked request from ${identifier} to ${request.path}`)
+      // Track malicious IPs, send alerts, etc.
+    }
+  }
+})
+```
+
+## Storage Configuration
+
+Configure memory storage limits and cleanup:
+
+```javascript
+await server.register({
+  plugin: Ratli,
+  options: {
+    storage: {
+      type: 'memory',
+      options: {
+        maxSize: 5000,        // Store max 5000 entries (LRU eviction)
+        cleanupInterval: 30000  // Clean up expired entries every 30 seconds
+      }
+    },
+    rateLimit: {
+      points: 100,
+      duration: 60
+    }
+  }
+})
+```
+
 ## Testing Support
 
-The plugin exposes a `reset()` method for clearing rate limit storage in tests:
+The plugin exposes methods for testing and monitoring:
+
+### Reset Storage
 
 ```javascript
 // In your tests
 await server.plugins.ratli.reset()
 // All rate limit counters are cleared
+```
+
+### Check Rate Limit Status
+
+```javascript
+// Check current status without consuming points
+const status = await server.plugins.ratli.getStatus('ip:192.168.1.1')
+// Returns: { remainingPoints: 95, resetTime: 1735301400000, isBlocked: false }
+// Returns null if no entry exists
 ```
 
 ## TypeScript
