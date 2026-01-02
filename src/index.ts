@@ -277,6 +277,24 @@ const isValidIp = (ip: string): boolean => {
   return ipv6Pattern.test(ip)
 }
 
+const sanitizeApiKey = (key: string): string | null => {
+  if (!key || typeof key !== 'string') {
+    return null
+  }
+
+  const trimmed = key.trim()
+
+  if (trimmed.length === 0 || trimmed.length > 512) {
+    return null
+  }
+
+  if (!/^[a-zA-Z0-9._-]+$/.test(trimmed)) {
+    return null
+  }
+
+  return trimmed
+}
+
 const checkLists = (value: string, allowList?: string[], blockList?: string[]): 'allow' | 'block' | 'continue' => {
   if (allowList && allowList.length > 0 && allowList.includes(value)) {
     return 'allow'
@@ -315,7 +333,16 @@ const plugin: Plugin<RatliPluginOptions> = {
               ipOptions.allowXForwardedForFrom.includes(request.info.remoteAddress)
 
             if (shouldTrust) {
-              clientIp = ips[0]
+              const trustedProxies = ipOptions.allowXForwardedForFrom || []
+              for (let i = ips.length - 1; i >= 0; i--) {
+                if (!trustedProxies.includes(ips[i])) {
+                  clientIp = ips[i]
+                  break
+                }
+              }
+              if (clientIp === request.info.remoteAddress && ips.length > 0) {
+                clientIp = ips[0]
+              }
             }
           }
         }
@@ -355,7 +382,16 @@ const plugin: Plugin<RatliPluginOptions> = {
         return undefined
       }
 
-      const result = checkLists(apiKey, keyOptions.allowList, keyOptions.blockList)
+      const sanitizedKey = sanitizeApiKey(apiKey)
+      if (!sanitizedKey) {
+        const trimmed = apiKey.trim()
+        if (trimmed.length === 0) {
+          return undefined
+        }
+        throw new BlockedApiKeyError()
+      }
+
+      const result = checkLists(sanitizedKey, keyOptions.allowList, keyOptions.blockList)
 
       if (result === 'allow') {
         return null
@@ -365,7 +401,7 @@ const plugin: Plugin<RatliPluginOptions> = {
         throw new BlockedApiKeyError()
       }
 
-      return `key:${apiKey}`
+      return `key:${sanitizedKey}`
     }
 
     const getClientIdentifier = (request: Request<ReqRefDefaults>): string | null | undefined => {
@@ -458,7 +494,7 @@ const plugin: Plugin<RatliPluginOptions> = {
           return h.response({
             statusCode: 403,
             error: 'Forbidden',
-            message: error.message
+            message: 'Access forbidden'
           }).code(403).takeover()
         }
         throw error

@@ -181,6 +181,35 @@ describe('ratli', () => {
       expect(res.statusCode).toBe(403)
       expect(res.result).toHaveProperty('error', 'Forbidden')
     })
+
+    it('should not expose IP address in blocked IP error message', async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: {
+            blockList: ['192.168.1.100']
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        remoteAddress: '192.168.1.100'
+      })
+
+      expect(res.statusCode).toBe(403)
+      expect(res.result).toHaveProperty('error', 'Forbidden')
+      expect(res.result).toHaveProperty('message', 'Access forbidden')
+      // Ensure the IP is NOT exposed in the response
+      expect(JSON.stringify(res.result)).not.toContain('192.168.1.100')
+    })
   })
 
   describe('X-Forwarded-For support', () => {
@@ -260,6 +289,172 @@ describe('ratli', () => {
 
       expect(res1.statusCode).toBe(200)
       expect(res2.statusCode).toBe(429)
+    })
+
+    it('should properly validate proxy chain and use rightmost untrusted IP', async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: {
+            allowXForwardedFor: true,
+            allowXForwardedForFrom: ['10.0.0.1'] // trusted proxy
+          },
+          rateLimit: {
+            points: 2,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      // Simulate a request through a trusted proxy with client IP 192.168.1.50
+      const res1 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-forwarded-for': '192.168.1.50, 10.0.0.1'
+        },
+        remoteAddress: '10.0.0.1'
+      })
+
+      // Another request from the same client through the proxy
+      const res2 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-forwarded-for': '192.168.1.50, 10.0.0.1'
+        },
+        remoteAddress: '10.0.0.1'
+      })
+
+      // Third request should be rate limited
+      const res3 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-forwarded-for': '192.168.1.50, 10.0.0.1'
+        },
+        remoteAddress: '10.0.0.1'
+      })
+
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+      expect(res3.statusCode).toBe(429)
+    })
+
+    it('should not trust X-Forwarded-For from untrusted sources', async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: {
+            allowXForwardedFor: true,
+            allowXForwardedForFrom: ['10.0.0.1'] // only trust this proxy
+          },
+          rateLimit: {
+            points: 2,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      // Request from untrusted proxy attempting to spoof IP
+      const res1 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-forwarded-for': '192.168.1.50'
+        },
+        remoteAddress: '10.0.0.2' // untrusted proxy
+      })
+
+      const res2 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-forwarded-for': '192.168.1.50'
+        },
+        remoteAddress: '10.0.0.2'
+      })
+
+      const res3 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-forwarded-for': '192.168.1.50'
+        },
+        remoteAddress: '10.0.0.2'
+      })
+
+      // Should rate limit based on actual remoteAddress (10.0.0.2), not spoofed IP
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+      expect(res3.statusCode).toBe(429)
+    })
+
+    it('should handle proxy chain with multiple proxies correctly', async () => {
+      await server.register({
+        plugin,
+        options: {
+          ip: {
+            allowXForwardedFor: true,
+            allowXForwardedForFrom: ['10.0.0.3', '10.0.0.2'] // trusted proxies
+          },
+          rateLimit: {
+            points: 2,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      // Client IP -> Proxy1 -> Proxy2 (chain: 192.168.1.50, 10.0.0.2, 10.0.0.3)
+      const res1 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-forwarded-for': '192.168.1.50, 10.0.0.2, 10.0.0.3'
+        },
+        remoteAddress: '10.0.0.3'
+      })
+
+      const res2 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-forwarded-for': '192.168.1.50, 10.0.0.2, 10.0.0.3'
+        },
+        remoteAddress: '10.0.0.3'
+      })
+
+      const res3 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-forwarded-for': '192.168.1.50, 10.0.0.2, 10.0.0.3'
+        },
+        remoteAddress: '10.0.0.3'
+      })
+
+      // Should identify client as 192.168.1.50 (rightmost untrusted)
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+      expect(res3.statusCode).toBe(429)
     })
   })
 
@@ -408,6 +603,394 @@ describe('ratli', () => {
       })
 
       expect(res.statusCode).toBe(403)
+    })
+
+    it('should not expose API key details in blocked key error message', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            blockList: ['blocked-key-123']
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-api-key': 'blocked-key-123'
+        }
+      })
+
+      expect(res.statusCode).toBe(403)
+      expect(res.result).toHaveProperty('error', 'Forbidden')
+      expect(res.result).toHaveProperty('message', 'Access forbidden')
+      // Ensure the key is NOT exposed in the response
+      expect(JSON.stringify(res.result)).not.toContain('blocked-key-123')
+    })
+
+    it('should reject API keys with invalid characters', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            fallbackToIpOnMissingKey: false
+          },
+          rateLimit: {
+            points: 5,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      // Test various invalid characters
+      const invalidKeys = [
+        'key with spaces',
+        'key@invalid',
+        'key#hash',
+        'key(parens)',
+        'key[brackets]',
+        'key+plus'
+      ]
+
+      for (const invalidKey of invalidKeys) {
+        const res = await server.inject({
+          method: 'GET',
+          url: '/test',
+          headers: {
+            'x-api-key': invalidKey
+          }
+        })
+
+        expect(res.statusCode).toBe(403)
+        expect(res.result).toHaveProperty('message', 'Access forbidden')
+      }
+    })
+
+    it('should accept valid API keys with allowed characters', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            fallbackToIpOnMissingKey: false
+          },
+          rateLimit: {
+            points: 5,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const validKeys = [
+        'valid-key-123',
+        'ValidKey.456',
+        'valid_key_789',
+        'a1b2c3d4e5f6',
+        'Key-With.Multiple_Types'
+      ]
+
+      for (const validKey of validKeys) {
+        const res = await server.inject({
+          method: 'GET',
+          url: '/test',
+          headers: {
+            'x-api-key': validKey
+          }
+        })
+
+        expect(res.statusCode).toBe(200)
+      }
+    })
+
+    it('should reject empty or whitespace-only API keys', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            fallbackToIpOnMissingKey: false
+          },
+          rateLimit: {
+            points: 5,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const invalidKeys = ['', '   ', '\t', '\n']
+
+      for (const invalidKey of invalidKeys) {
+        const res = await server.inject({
+          method: 'GET',
+          url: '/test',
+          headers: {
+            'x-api-key': invalidKey
+          }
+        })
+
+        // Empty/whitespace keys are treated as missing
+        expect(res.statusCode).toBe(200)
+      }
+    })
+
+    it('should reject excessively long API keys', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            fallbackToIpOnMissingKey: false
+          },
+          rateLimit: {
+            points: 5,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      // Create a key longer than 512 characters
+      const longKey = 'a'.repeat(513)
+
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-api-key': longKey
+        }
+      })
+
+      expect(res.statusCode).toBe(403)
+      expect(res.result).toHaveProperty('message', 'Access forbidden')
+    })
+
+    it('should trim whitespace from API keys', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            fallbackToIpOnMissingKey: false
+          },
+          rateLimit: {
+            points: 2,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      // Same key with different whitespace should be treated as same
+      const res1 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-api-key': '  valid-key-123  '
+        }
+      })
+
+      const res2 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-api-key': 'valid-key-123'
+        }
+      })
+
+      const res3 = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-api-key': '\tvalid-key-123\t'
+        }
+      })
+
+      expect(res1.statusCode).toBe(200)
+      expect(res2.statusCode).toBe(200)
+      expect(res3.statusCode).toBe(429) // Should be rate limited as it's the same key
+    })
+
+    it('should prevent storage key collision attacks', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            fallbackToIpOnMissingKey: false
+          },
+          rateLimit: {
+            points: 2,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      // Try to use keys that might cause collisions with internal prefixes
+      const attackKeys = [
+        'key:attacker',
+        'ip:192.168.1.1',
+        '../../../key'
+      ]
+
+      for (const attackKey of attackKeys) {
+        const res = await server.inject({
+          method: 'GET',
+          url: '/test',
+          headers: {
+            'x-api-key': attackKey
+          }
+        })
+
+        // Should be rejected due to invalid characters
+        expect(res.statusCode).toBe(403)
+      }
+    })
+
+    it('should handle invalid API key with X-Forwarded-For header', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            fallbackToIpOnMissingKey: false
+          },
+          rateLimit: {
+            points: 5,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const res = await server.inject({
+        method: 'GET',
+        url: '/test',
+        headers: {
+          'x-forwarded-for': '1.2.3.4',
+          'x-api-key': 'invalid key with spaces'
+        },
+        remoteAddress: '10.0.0.2'
+      })
+
+      expect(res.statusCode).toBe(403)
+      expect(res.result).toHaveProperty('message', 'Access forbidden')
+    })
+
+    it('should maintain rate limiting integrity with sanitized keys', async () => {
+      await server.stop()
+      server = new Server()
+
+      await server.register({
+        plugin,
+        options: {
+          ip: false,
+          key: {
+            fallbackToIpOnMissingKey: false
+          },
+          rateLimit: {
+            points: 3,
+            duration: 60
+          }
+        }
+      })
+
+      server.route({
+        method: 'GET',
+        path: '/test',
+        handler: () => ({ success: true })
+      })
+
+      const validKey = 'secure-key-123'
+
+      // Make multiple requests with the same valid key
+      const responses = []
+      for (let i = 0; i < 4; i++) {
+        responses.push(await server.inject({
+          method: 'GET',
+          url: '/test',
+          headers: {
+            'x-api-key': validKey
+          }
+        }))
+      }
+
+      expect(responses[0].statusCode).toBe(200)
+      expect(responses[1].statusCode).toBe(200)
+      expect(responses[2].statusCode).toBe(200)
+      expect(responses[3].statusCode).toBe(429) // Rate limited
     })
   })
 
